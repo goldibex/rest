@@ -119,7 +119,7 @@ func TestSizeLimit(t *testing.T) {
 	data := make([]byte, (1<<10)+1)
 	n, err := devRandom.Read(data)
 	if n < (1<<10)+1 || err != nil {
-		t.Fatalf("Error reading data from /dev/random for test: got %d bytes with error %s", err)
+		t.Fatalf("Error reading data from /dev/random for test: got %d bytes with error %s", n, err)
 	}
 
 	handler := e.Handler()
@@ -133,4 +133,21 @@ func TestSizeLimit(t *testing.T) {
 		t.Errorf("Size limit test: expected http return code %d, got %d",
 			http.StatusRequestEntityTooLarge, w.Code)
 	}
+}
+
+func TestNewEndpoint(t *testing.T) {
+  e := NewEndpoint("yams")
+
+  handler := e.Handler()
+  w := httptest.NewRecorder()
+
+  r, _ := http.NewRequest("POST", "http://example.com/yams/1", nil)
+  r.Header.Set("Accept", "text/plain")
+  r.Header.Set("Content-Type", "text/plain")
+
+  handler.ServeHTTP(w, r)
+  if w.Code != http.StatusNotImplemented {
+    t.Errorf("New endpoint test: expected http return code %d, got %d",
+    http.StatusNotImplemented, w.Code)
+  }
 }
