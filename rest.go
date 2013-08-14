@@ -6,6 +6,7 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
+  "os"
 
 	"github.com/gorilla/mux"
 )
@@ -109,12 +110,12 @@ func GetCollectionHandlerGen(name string) GetCollectionHandler {
 */
 
 // CollectionHandler is the function signature for handlers of REST collections.
-type CollectionHandler func(r *http.Request, body []byte) ([]interface{}, error)
+type CollectionHandler func(r *http.Request, body []byte) (interface{}, error)
 
 // UnimplementedCollectionHandler is a stub function to fill out an Endpoint that
 // only needs to implement certain REST methods on collections but not others. It always
 // returns ErrNotImplemented.
-func UnimplementedCollectionHandler(r *http.Request, body []byte) ([]interface{}, error) {
+func UnimplementedCollectionHandler(r *http.Request, body []byte) (interface{}, error) {
 	return nil, ErrNotImplemented
 }
 
@@ -143,6 +144,9 @@ type Endpoint struct {
 	// Name will be used to set the HTTP URL handlers for this REST object. For
 	// instance, if Name is "yams", then Endpoint.Handler will return an http.Handler
 	// that responds to "/yams" for collection actions and "/yams/{id}" for object actions.
+  // the "id" URL parameter will be passed through to the relevant method handler,
+  // so for instance a request to /yams/sweetpotato will have "sweetpotato" in 
+  // the id argument.
 	Name string
 	// StatusCodeLookup maps error object to HTTP status codes.
 	// NB: if rest can't look up an error an Endpoint returns in this map, it will
@@ -153,8 +157,34 @@ type Endpoint struct {
 	Logger Logger
 }
 
+// NewEndpoint returns a initialized endpoint ready for use. Note that all requests
+// will return 501 (Not Implemented) until proper handlers are set.
+func NewEndpoint(name string) *Endpoint {
+  return &Endpoint{
+    GetCollection: UnimplementedCollectionHandler,
+    PostCollection: UnimplementedCollectionHandler,
+
+    Head: UnimplementedHandler,
+    Get: UnimplementedHandler,
+    Put: UnimplementedHandler,
+    Post: UnimplementedHandler,
+    Delete: UnimplementedHandler,
+
+    Name: name,
+    Codec: Codec {
+      Accepts: "text/plain",
+      MaxSize: 1<<10, // 1 megabyte
+      Marshal: func(v interface{}) ([]byte, error) {
+        return []byte(fmt.Sprintf("%+v", v)), nil
+      },
+    },
+    StatusCodeLookup: map[error]int{},
+    Logger: IOLogger{os.Stdout},
+  }
+}
+
 func (e *Endpoint) handlerGen() func(w http.ResponseWriter, r *http.Request) {
-	return func(w http.ResponseWriter, r *http.Request) {
+  return func(w http.ResponseWriter, r *http.Request) {
 		var (
 			rv   interface{}
 			data []byte
@@ -254,7 +284,7 @@ func notAllowedHandler(w http.ResponseWriter, r *http.Request) {
 // Router builds a Gorilla router that will handle requests RESTfully using the endpoint.
 // If the calling function passes nil for r, Router will create a new mux.Router.
 func (e *Endpoint) Router(r *mux.Router) *mux.Router {
-	if r == nil {
+  if r == nil {
 		r = mux.NewRouter()
 	}
 	eHandler := e.handlerGen()
