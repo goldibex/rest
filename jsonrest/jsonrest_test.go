@@ -16,8 +16,8 @@ type testT struct {
   YamCount int `json:"yam_count"`
 }
 
-func TestNewJSONEndpoint(t *testing.T) {
-  e := NewJSONEndpoint("yams")
+func TestNewEndpoint(t *testing.T) {
+  e := NewEndpoint("yams")
   handler := e.Handler()
 
   // with valid Accept
