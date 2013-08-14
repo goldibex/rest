@@ -83,7 +83,7 @@ Date: Thu, 1 Jan 1970 00:00:01 GMT
 That's better, but we still get 501 "Not Implemented." This is because we haven't actually set any handler functions yet. We can alter the server's behavior by setting the returned ```*rest.Endpoint```'s handlers like so:
 
 ```go
-	e.GetCollection = func(r *http.Request, body []byte) ([]interface{}, error) {
+	e.GetCollection = func(r *http.Request, body []byte) (interface{}, error) {
 		yams := []string{
 			"YAMS",
 			"YAMS",
