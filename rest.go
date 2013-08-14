@@ -1,4 +1,3 @@
-// Package rest provides useful abstractions for creating a RESTful web service.
 package rest
 
 import (
