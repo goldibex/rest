@@ -80,6 +80,8 @@ var (
 	// ErrNotImplemented is the error that stub REST handlers always return. It
 	// corresponds to http.StatusNotImplemented.
 	ErrNotImplemented error = errors.New("Method not implemented")
+  // ErrNotFound corresponds to http.StatusNotFound.
+  ErrNotFound error = errors.New("Not found")
 )
 
 /*
@@ -155,6 +157,10 @@ type Endpoint struct {
 	StatusCodeLookup map[error]int
 	// Logger is the Logger object rest uses to record events in the REST lifecycle.
 	Logger Logger
+  
+  // If not nil, rest.Endpoint will call this method to get a logger for the
+  // specific request rather than use the default logger. Useful for App Engine apps.
+  RequestLogger func(r *http.Request) Logger
 }
 
 // NewEndpoint returns a initialized endpoint ready for use. Note that all requests
@@ -178,7 +184,9 @@ func NewEndpoint(name string) *Endpoint {
         return []byte(fmt.Sprintf("%+v", v)), nil
       },
     },
-    StatusCodeLookup: map[error]int{},
+    StatusCodeLookup: map[error]int{
+      ErrNotFound: http.StatusNotFound,
+    },
     Logger: IOLogger{os.Stdout},
   }
 }
@@ -192,21 +200,29 @@ func (e *Endpoint) handlerGen() func(w http.ResponseWriter, r *http.Request) {
 
       statusCode int
       ok bool
+      log Logger
 		)
+    // get the logger
+    if e.RequestLogger != nil {
+      log = e.RequestLogger(r)
+    } else {
+      log = e.Logger
+    }
+
 		// we return the content type set by the codec
 		w.Header().Set("Content-Type", e.Codec.Accepts)
 
 		// recover the object id (mux stashes it away for us)
 		id := mux.Vars(r)["id"]
 		if id != "" {
-			e.Logger.Debugf("id: %s", id)
+			log.Debugf("id: %s", id)
 		}
 
 		// decode body phase
 		// respect size limit
 		if r.ContentLength > e.Codec.MaxSize {
 			http.Error(w, "", http.StatusRequestEntityTooLarge)
-			e.Logger.Errorf("Request body too large: max %d bytes, was %d", e.Codec.MaxSize, r.ContentLength)
+			log.Errorf("Request body too large: max %d bytes, was %d", e.Codec.MaxSize, r.ContentLength)
 			return
 		}
 
@@ -215,7 +231,7 @@ func (e *Endpoint) handlerGen() func(w http.ResponseWriter, r *http.Request) {
 			data, err = ioutil.ReadAll(r.Body)
 			if err != nil {
 				http.Error(w, "", http.StatusInternalServerError)
-				e.Logger.Errorf("Error reading request body: %s", err)
+				log.Errorf("Error reading request body: %s", err)
 				return
 			}
 		}
@@ -229,7 +245,7 @@ func (e *Endpoint) handlerGen() func(w http.ResponseWriter, r *http.Request) {
 				err = ErrNotImplemented
 			}
 		} else {
-			// supported methods: GET, POST, PUT, DELETE
+			// supported methods: HEAD, GET, POST, PUT, DELETE
 			switch r.Method {
 			case "HEAD":
 				rv, err = e.Head(r, id, data)
@@ -250,7 +266,7 @@ func (e *Endpoint) handlerGen() func(w http.ResponseWriter, r *http.Request) {
     data, marshalErr := e.Codec.Marshal(rv)
 		if marshalErr != nil {
 			http.Error(w, "", http.StatusInternalServerError)
-			e.Logger.Errorf("Error marshaling return value: %s", marshalErr)
+			log.Errorf("Error marshaling return value: %s", marshalErr)
 			return
 		}
 
@@ -261,13 +277,13 @@ func (e *Endpoint) handlerGen() func(w http.ResponseWriter, r *http.Request) {
     case ErrNotImplemented:
       statusCode = http.StatusNotImplemented
     default:
-			e.Logger.Errorf("Error returned during REST: id %s, method %s, error %s", id, r.Method, err)
+			log.Errorf("Error returned during REST: id %s, method %s, error %s", id, r.Method, err)
 			statusCode, ok = e.StatusCodeLookup[err]
 			if !ok {
 				statusCode = http.StatusInternalServerError
 			}
 		}
-
+    w.Header().Set("X-Handled-By", "github.com/goldibex/rest")
 		w.WriteHeader(statusCode)
     w.Write(data)
 	}
@@ -288,7 +304,6 @@ func (e *Endpoint) Router(r *mux.Router) *mux.Router {
 		r = mux.NewRouter()
 	}
 	eHandler := e.handlerGen()
-	e.Logger.Debugf("creating new route: %s", e.Name)
 
 	// collection path
 	r.Path("/"+e.Name).
@@ -307,18 +322,18 @@ func (e *Endpoint) Router(r *mux.Router) *mux.Router {
 		HandlerFunc(notAllowedHandler)
 
 	// object path
-	r.Path("/"+e.Name+"/{id}").
+  r.Path("/"+e.Name+"/{id:[A-Za-z0-9-]+}").
 		Methods("HEAD", "GET", "POST", "PUT", "DELETE").
 		Headers("Accept", e.Codec.Accepts).
 		HandlerFunc(eHandler)
 
 	// object path with wrong accept (triggers 406)
-	r.Path("/"+e.Name+"/{id}").
+  r.Path("/"+e.Name+"/{id:[A-Za-z0-9-]+}").
 		Methods("HEAD", "GET", "POST", "PUT", "DELETE").
 		HandlerFunc(notAcceptableHandler)
 
 	// object path with wrong method (triggers 405)
-	r.Path("/"+e.Name+"/{id}").
+  r.Path("/"+e.Name+"/{id:[A-Za-z0-9-]+}").
 		Methods("OPTIONS", "TRACE", "CONNECT").
 		HandlerFunc(notAllowedHandler)
 
